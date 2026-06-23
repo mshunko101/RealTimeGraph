@@ -342,9 +342,9 @@ void CRealTimeGraphDlg::PerformAction(const CString& reason) {
         logEntry.Format(_T("[%s] ТРЕВОГА: %s\r\n"),
             now.Format("%Y-%m-%d %H:%M:%S"),
             reason);
-
+        file.SeekToEnd();
         // Пишем ровно столько байт, сколько символов в строке (для ANSI)
-        file.Write(logEntry, logEntry.GetLength());
+        file.Write(logEntry, logEntry.GetLength()*2);
 
         file.Close();
 

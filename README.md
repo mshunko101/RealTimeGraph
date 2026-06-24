@@ -112,5 +112,5 @@
 
 ## Плюсы:
  - Всегда можно раздолбать кувалдочкой узел управления, а не вырвать кусок мозга как в NeuroLink
-## Минусы
- - Требует усилий, которые лингвистическое ядро Запада легко [сводит на нет](https://youtube.com/watch?v=prVuYe61Y2g&lc=UgwPqK_e9kWBKADEufF4AaABAg&si=YclwKVxHO2rcETA_)
+## Минусы:
+ - Требует усилий, которые [лингвистическое ядро](https://shedevrum.ai/post/891169d32f2b11f09dcc3e81a2a92a83/) [Запада](https://youtu.be/l0U7SxXHkPY?list=RDl0U7SxXHkPY) [легко](https://youtu.be/Jr9Kaa1sycs?list=RDJr9Kaa1sycs) [сводит на нет](https://youtube.com/watch?v=prVuYe61Y2g&lc=UgwPqK_e9kWBKADEufF4AaABAg&si=YclwKVxHO2rcETA_)

@@ -42,7 +42,7 @@ void CRealTimeGraphDlg::DoDataExchange(CDataExchange* pDX) {
     CDialogEx::DoDataExchange(pDX);
 
     DDX_Control(pDX, IDC_BTN_RECORD, m_btnRecord);
-
+    DDX_Control(pDX, IDC_STATIC_STATUS, m_pStatusText);
     DDX_Control(pDX, IDC_EDIT_NAME, m_editName);      // Поле ввода имени шаблона
 
     // Для статуса (CWnd*) нельзя использовать DDX_Control напрямую в старом стиле,
@@ -71,7 +71,7 @@ bool CRealTimeGraphDlg::OpenComPort(LPCTSTR portName, HANDLE& hCom) {
     return true;
 }
 
-// --- Поток чтения (Worker Thread) ---
+
 ULONG __stdcall ReadThreadProc(LPVOID pParam) {
     CRealTimeGraphDlg* pDlg = reinterpret_cast<CRealTimeGraphDlg*>(pParam);
     if (!pDlg || !pDlg->m_bConnected) return 1;
@@ -92,32 +92,120 @@ ULONG __stdcall ReadThreadProc(LPVOID pParam) {
                 line.Replace(_T("\r"), _T(""));
                 line.Replace(_T("\n"), _T(""));
 
-                // Парсим и сохраняем данные
+                // --- ГЛАВНОЕ ИЗМЕНЕНИЕ ЗДЕСЬ ---
+
+                if (pDlg->m_isCalibrating) {
+                    // РЕЖИМ КАЛИБРОВКИ: Просто собираем сырые данные
+                    double rawValue = 0.0;
+
+                    // Парсим значение (предполагаем формат "OK,123,2.5" или просто число)
+                    // Адаптируй парсинг под твой текущий ParseAndStoreData, если он сложнее
+                    int commaPos = line.Find(_T(","));
+                    if (commaPos != -1) {
+                        CString valStr = line.Mid(commaPos + 1);
+                        // Если там два числа через запятую, берем первое (raw)
+                        int nextComma = valStr.Find(_T(","));
+                        if (nextComma != -1) valStr = valStr.Left(nextComma);
+
+                        rawValue = _tcstod(valStr, nullptr);
+                    }
+                    else {
+                        // Если формат просто число
+                        rawValue = _tcstod(line, nullptr);
+                    }
+
+                    pDlg->m_calibrationBuffer.push_back(rawValue);
+
+                    // Проверка: набрали ли нужное количество точек?
+                    if ((int)pDlg->m_calibrationBuffer.size() >= pDlg->CALIB_SAMPLES) {
+                        // Считаем среднее (это и есть наш "ноль")
+                        double sum = 0.0;
+                        for (double v : pDlg->m_calibrationBuffer) {
+                            sum += v;
+                        }
+                        pDlg->m_baselineOffset = sum / pDlg->m_calibrationBuffer.size();
+
+                        // Сбрасываем флаги
+                        pDlg->m_isCalibrating = false;
+                        pDlg->m_isCalibrated = true;
+                        pDlg->m_calibrationBuffer.clear();
+
+
+                        // Опционально: можно обновить статус бар здесь
+                        if (pDlg->m_pStatusText) {
+                            pDlg->m_pStatusText.SetWindowText(_T("Статус: Калибровано. Готов к работе."));
+                        }
+                    }
+
+                    // Важно: в режиме калибровки НЕ вызываем ParseAndStoreData,
+                    // чтобы не рисовать мусор и не портить шаблоны.
+                    Sleep(40);
+                    continue;
+                }
+
+                // --- ОБЫЧНЫЙ РЕЖИМ (после калибровки) ---
+
+                // Если калибровка еще не пройдена, можно игнорировать данные или показать предупреждение
+                if (!pDlg->m_isCalibrated) {
+                    // Можно раскомментировать, если хочешь видеть предупреждение в логе
+                    // (но AfxMessageBox в потоке нельзя! только лог или флаг)
+                    Sleep(40);
+                    pDlg->m_pStatusText.SetWindowTextW(_T("Идет юстировка"));
+                    continue;
+                }
+
+                // Парсим данные как обычно
                 pDlg->ParseAndStoreData(line);
+
+                // ВАЖНО: Внутри ParseAndStoreData (или сразу после) нужно применить вычитание фона.
+                // Смотри инструкцию ниже, как это сделать внутри ParseAndStoreData.
             }
         }
-        Sleep(40); // Частота опроса ~25 Гц
+        Sleep(40);
     }
     return 0;
 }
+
 
 // --- Парсинг строки от Arduino "OK,512,1.650" ---
 void CRealTimeGraphDlg::ParseAndStoreData(const CString& line) {
     if (line.Find(_T("OK,")) != 0) return;
 
-    CString rest = line.Mid(3);
-    int commaPos = rest.Find(_T(','));
-    if (commaPos == -1) return;
 
-    CString strVolt = rest.Mid(commaPos + 1);
-    double volts = _tcstod(strVolt, nullptr);
+    double rawValue = 0.0;
+    // ... твой код парсинга ...
+    // Например:
+    int commaPos = line.Find(_T(","));
+    if (commaPos != -1) {
+        CString sub = line.Mid(commaPos + 1);
+        int nextComma = sub.Find(_T(","));
+        if (nextComma != -1) sub = sub.Left(nextComma);
+        rawValue = _tcstod(sub, nullptr);
+    }
+    else {
+        rawValue = _tcstod(line, nullptr);
+    }
+    // 2. ПРИМЕНЕНИЕ КАЛИБРОВКИ (ЮСТИРОВКА)
+    // Вычитаем найденный ноль. Теперь сигнал колеблется вокруг 0.
+    double volts = rawValue - m_baselineOffset;
+    static std::vector<double> smoothWindow;
+    const int WINDOW_SIZE = 7; // Нечётное число
+
+    smoothWindow.push_back(volts);
+    if ((int)smoothWindow.size() > WINDOW_SIZE) {
+        smoothWindow.erase(smoothWindow.begin());
+    }
+
+    double smoothedVolts = 0.0;
+    for (double v : smoothWindow) smoothedVolts += v;
+    smoothedVolts /= smoothWindow.size();
 
     {
         std::lock_guard<std::mutex> lock(m_bufferMutex);
 
         DataPoint pt;
         pt.timeSec = GetTickCount() / 1000.0;
-        pt.valueVolts = volts;
+        pt.valueVolts = smoothedVolts;
         m_dataBuffer.push_back(pt);
 
         // Кольцевой буфер: удаляем старые
@@ -128,7 +216,7 @@ void CRealTimeGraphDlg::ParseAndStoreData(const CString& line) {
 
     // ЛОГИКА ЗАПИСИ ШАБЛОНА
     if (m_bRecordingTemplate) {
-        m_tempRecordingBuffer.push_back(volts);
+        m_tempRecordingBuffer.push_back(smoothedVolts);
         m_recordCount++;
 
         if (m_recordCount >= TEMPLATE_LENGTH) {
@@ -137,7 +225,7 @@ void CRealTimeGraphDlg::ParseAndStoreData(const CString& line) {
             m_editName.GetWindowText(name);
             if (name.IsEmpty()) name = _T("Auto_Pattern");
 
-            PatternTemplate newPat(name, 0.85);
+            PatternTemplate newPat(name);
             newPat.signal = m_tempRecordingBuffer;
             m_templates.push_back(newPat);
 
@@ -149,7 +237,7 @@ void CRealTimeGraphDlg::ParseAndStoreData(const CString& line) {
                 CString msg;
                 msg.Format(_T("ШАБЛОН '%s' СОХРАНЕН (%d точек). Всего шаблонов: %d"),
                     name, newPat.signal.size(), (int)m_templates.size());
-                m_pStatusText->SetWindowText(msg);
+                m_pStatusText.SetWindowText(msg);
             }
 
             // Переключаем кнопку обратно на "Начать запись"
@@ -159,18 +247,34 @@ void CRealTimeGraphDlg::ParseAndStoreData(const CString& line) {
             if (m_pStatusText) {
                 CString msg;
                 msg.Format(_T("Запись шаблона... собрано %d/%d точек"), m_recordCount, TEMPLATE_LENGTH);
-                m_pStatusText->SetWindowText(msg);
+                m_pStatusText.SetWindowText(msg);
             }
         }
     }
     else {
         // Если не запись, просто обновляем статус
-        if (m_pStatusText && m_pStatusText->GetWindowTextLength() == 0) {
-            m_pStatusText->SetWindowText(_T("Ожидание данных..."));
+        if (m_pStatusText && m_pStatusText.GetWindowTextLength() == 0) {
+            m_pStatusText.SetWindowText(_T("Ожидание данных..."));
         }
     }
 
     InvalidateRect(NULL, FALSE); // Запрос перерисовки
+}
+std::vector<double> NormalizeVector(const std::vector<double>& vec) {
+    if (vec.empty()) return vec;
+
+    double minVal = *std::min_element(vec.begin(), vec.end());
+    double maxVal = *std::max_element(vec.begin(), vec.end());
+    double range = maxVal - minVal;
+
+    if (range < 1e-6) return vec; // Защита от деления на ноль
+
+    std::vector<double> normalized;
+    normalized.reserve(vec.size());
+    for (double v : vec) {
+        normalized.push_back((v - minVal) / range);
+    }
+    return normalized;
 }
 
 // --- МАТЕМАТИКА: Регрессия и Статистика ---
@@ -291,36 +395,35 @@ void CRealTimeGraphDlg::CheckAndActOnPatterns() {
         currentSignal.push_back(pt.valueVolts);
     }
 
+     
     bool foundAny = false;
-
     for (const auto& temp : m_templates) {
         if ((int)currentSignal.size() < (int)temp.signal.size()) continue;
 
-        double corr = CalculateCorrelation(currentSignal, temp.signal);
+        // 1. Берём хвост текущего сигнала такой же длины, как шаблон
+        std::vector<double> signalTail;
+        int startIdx = currentSignal.size() - temp.signal.size();
+        for (size_t i = startIdx; i < currentSignal.size(); ++i) {
+            signalTail.push_back(currentSignal[i]);
+        }
 
-        // Если схожесть выше порога -> ПАТТЕРН НАЙДЕН!
+        // 2. НОРМАЛИЗУЕМ ОБА ВЕКТОРА
+        auto normSignal = NormalizeVector(signalTail);
+        auto normPattern = NormalizeVector(temp.signal);
+
+        // 3. Считаем корреляцию уже на нормализованных данных
+        double corr = CalculateCorrelation(normSignal, normPattern);
+
         if (corr > temp.threshold) {
-            CString msg;
-            msg.Format(_T("!!! ПАТТЕРН ОБНАРУЖЕН: %s (Сходство: %.2f)"),
-                temp.name, corr);
-
-            if (m_pStatusText) m_pStatusText->SetWindowText(msg);
-
-            // Выполняем действие
-            PerformAction(msg);
-
-            foundAny = true;
-
-            // ВАЖНО: Чтобы не срабатывать 100 раз на один импульс,
-            // можно добавить флаг "cooldown" или очистить буфер.
-            // Сейчас просто выводим сообщение.
+            // СРАБОТАЛО! Теперь это сработает и на слабом, и на сильном нажатии
+            PerformAction(temp.name);
         }
     }
 
     // Если ничего не найдено, можно сбросить статус, если нужно
-    if (!foundAny && m_pStatusText && m_pStatusText->GetWindowTextLength() > 0) {
+    if (!foundAny && m_pStatusText && m_pStatusText.GetWindowTextLength() > 0) {
         // Опционально: раскомментируй, если хочешь видеть "Норма" всегда
-        // m_pStatusText->SetWindowText(_T("Норма")); 
+        // m_pStatusText.SetWindowText(_T("Норма")); 
     }
 }
 
@@ -391,7 +494,7 @@ void CRealTimeGraphDlg::OnBnClickedBtnRecord() {
         m_tempRecordingBuffer.clear();
         m_recordCount = 0;
         m_btnRecord.SetWindowText(_T("Начать запись шаблона"));
-        if (m_pStatusText) m_pStatusText->SetWindowText(_T("Запись отменена"));
+        if (m_pStatusText) m_pStatusText.SetWindowText(_T("Запись отменена"));
     }
     else {
         // Начинаем запись
@@ -399,7 +502,7 @@ void CRealTimeGraphDlg::OnBnClickedBtnRecord() {
         m_tempRecordingBuffer.clear();
         m_recordCount = 0;
         m_btnRecord.SetWindowText(_T("Идет запись..."));
-        if (m_pStatusText) m_pStatusText->SetWindowText(_T("РЕЖИМ ЗАПИСИ: Сделайте событие сейчас!"));
+        if (m_pStatusText) m_pStatusText.SetWindowText(_T("РЕЖИМ ЗАПИСИ: Сделайте событие сейчас!"));
     }
 }
 
@@ -519,6 +622,7 @@ BOOL CRealTimeGraphDlg::OnInitDialog()
 {
     OnBnClickedBtnConnect();
     OnBnClickedBtnStart();
+    m_isCalibrating = true;
     UpdateData(0);
     return true;
 }

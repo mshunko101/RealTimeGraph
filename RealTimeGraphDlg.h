@@ -31,13 +31,22 @@ struct StatsResult {
 };
 
 ULONG __stdcall ReadThreadProc(LPVOID pParam);
+
+struct PatternData {
+    CString name;
+    std::vector<std::vector<double>> rawRecordings; // Храним все попытки
+    std::vector<double> finalTemplate;             // Тут будет усредненный результат
+    bool isReady;
+};
+
+
 // Структура шаблона для Pattern Matching
 struct PatternTemplate {
     CString name;
     std::vector<double> signal;
-    double threshold = 0.85; // Порог схожести (0.0 - 1.0)
+    double threshold = 1.00; // Порог схожести (0.0 - 1.0)
 
-    PatternTemplate(const CString& n, double thresh) : name(n), threshold(thresh) {}
+    PatternTemplate(const CString& n, double thresh = 0.99999) : name(n), threshold(thresh) {}
 };
 
 class CRealTimeGraphDlg : public CDialogEx
@@ -77,7 +86,7 @@ public:
     CButton m_btnRecord;
     CEdit m_editPort;
     CEdit m_editName;
-    CWnd* m_pStatusText;
+    CStatic m_pStatusText;
     BOOL OnInitDialog() override;
     afx_msg void OnBnClickedBtnConnect();
     afx_msg void OnBnClickedBtnStart();
@@ -98,5 +107,14 @@ public:
 
     // Вспомогательные
     bool OpenComPort(LPCTSTR portName, HANDLE& hCom);
+    void OnBnClickedBtnCalibrate();
+    // --- Переменные для калибровки (Юстировка) ---
+    bool m_isCalibrating = false;           // Флаг: идет ли сейчас калибровка?
+    bool m_isCalibrated = false;            // Флаг: была ли калибровка успешно пройдена?
+    double m_baselineOffset = 0.0;         // Найденный "ноль" сенсора
+    std::vector<double> m_calibrationBuffer; // Буфер для сбора точек при калибровке
+
+    static const int CALIB_SAMPLES = 150;  // Сколько точек собрать (при Sleep(40) это ~6 сек)
+    // Можно уменьшить до 80-100, если 6 секунд долго ждать.
 };
 

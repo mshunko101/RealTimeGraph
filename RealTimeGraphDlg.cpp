@@ -456,7 +456,7 @@ void CRealTimeGraphDlg::PerformAction(const CString& reason) {
     // 3. Отправка команды обратно на Arduino (если нужно остановить процесс)
     // Пример: шлём "ALERT" на порт
     if (m_bConnected && m_hComPort != INVALID_HANDLE_VALUE) {
-        const char* cmd = "ALERT\n";
+        const char* cmd = "ALARM\n";
         DWORD written = 0;
         WriteFile(m_hComPort, cmd, strlen(cmd), &written, NULL);
     }
@@ -483,7 +483,7 @@ void CRealTimeGraphDlg::OnBnClickedBtnConnect() {
 }
 
 void CRealTimeGraphDlg::OnBnClickedBtnStart() {
-    SetTimer(1, 50, NULL); // Таймер каждые 50 мс (20 Гц)
+    SetTimer(1, 8, NULL); // Таймер каждые 50 мс (20 Гц)
 }
 
 void CRealTimeGraphDlg::OnBnClickedBtnRecord() {

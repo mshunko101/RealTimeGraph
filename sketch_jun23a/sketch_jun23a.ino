@@ -11,10 +11,16 @@
  * - Второй контакт датчика/источника на GND.
  */
 
-const int sensorPin = A1;           // Пин для измерения
-const int numReadings = 30;         // Количество замеров для усреднения
-const float VREF = 3.3;             // Опорное напряжение (для Vidor 4000 это 3.3В)
-const int DIVISOR = 1024;           // 2^10 бит = 1024 уровня квантования
+const int sensorPin = A2;
+
+// --- НАСТРОЙКИ ПОД НОВЫЙ СЕНСОР ---
+const float alpha = 0.03;       // Скорость адаптации нуля
+const float threshold_on = 0.5; // ПОРОГ: СНИЖЕН! Твои данные теперь ~30-40, так что 15 - это хороший старт.
+                                 // Если будет много ложных срабатываний - поставь 20. Если не срабатывает - поставь 10.
+const unsigned long lockoutTime = 10; // Блокировка: 500 мс тишины после импульса
+
+float adaptiveZero = 0.0;
+unsigned long lastTriggerTime = 0; 
 
 void setup() {
   // Инициализация последовательного порта (9600 бод - стандарт, можно увеличить до 115200)
@@ -23,37 +29,51 @@ void setup() {
   while (!Serial) {
     ; // Ждем подключения Serial (актуально для некоторых плат при первом запуске)
   }
-
-  Serial.println("=== Старт измерений ===");
-  Serial.print("Опорное напряжение: ");
-  Serial.print(VREF);
-  Serial.println(" В");
-  Serial.print("Количество точек усреднения: ");
-  Serial.println(numReadings);
-  Serial.println("-----------------------");
   
   // Небольшая задержка для стабилизации питания перед первым замером
   delay(100);
 }
-float readVoltageSmoothed() ;
-void loop() {
-  float voltage = readVoltageSmoothed();
-  int adcValue = (int)(voltage * DIVISOR / VREF); // Пересчет обратно в ADC для наглядности
+void loop() 
 
-  // Вывод данных в одну строку (удобно для Serial Plotter в Arduino IDE)
-  // Формат: "ADC_value Voltage_value"
-  //Serial.print(adcValue);
-   unsigned long currentTime = millis();
+{
+  
+  
+
+   // 1. Читаем датчик
+  int rawValue = analogRead(sensorPin);
+  float currentVal = (float)rawValue;
+
+  // 2. Считаем "Дзен" (адаптивный ноль)
+  adaptiveZero = adaptiveZero * (1.0 - alpha) + currentVal * alpha;
+  
+  // Считаем отклонение
+  float deviation = currentVal - adaptiveZero;
+  float absDev = abs(deviation);
+
+  unsigned long now = millis();
+  bool shouldOutputOne = false;
+
+  // 3. ЛОГИКА: Одиночный импульс
+  // Если прошло время блокировки И отклонение больше порога
+  if ((now - lastTriggerTime >= lockoutTime) && (absDev > threshold_on)) {
+    shouldOutputOne = true;
+    lastTriggerTime = now; // Запоминаем время, чтобы следующие 500мс выдавать 0
+  }
+
+
+
 if (Serial.available() > 0) {
     String cmd = Serial.readStringUntil('\n');
     cmd.trim();
-
+    
     if (cmd == "SEND_DATA") {
       Serial.print("OK,");
   // Отправляем данные в формате CSV: время,значение
-  Serial.print(currentTime);
-  Serial.print(",");
-  Serial.println(adcValue);
+ 
+    Serial.print(now);
+    Serial.print(",");   
+    Serial.println(shouldOutputOne ? 1 : 0);
+ 
   //Serial.println(voltage, 3); // 3 знака после запятой
     }
     else {
@@ -70,26 +90,4 @@ if (Serial.available() > 0) {
 // Интервал между замерами (мс). Не ставьте слишком мало, если используете медленные порты
 }
 }
-
-/**
- * Функция считывания и усреднения напряжения.
- * Возвращает напряжение в Вольтах.
- */
-float readVoltageSmoothed() {
-  long sum = 0;
-  
-  for (int i = 0; i < numReadings; i++) {
-    int rawValue = analogRead(sensorPin);
-    sum += rawValue;
-    
-    // Небольшая пауза между замерами помогает АЦП корректно перезаряжать внутренний конденсатор
-    delay(2); 
-  }
-  
-  float averageAdc = (float)sum / numReadings;
-  
-  // Формула перевода: Значение * (Опорное / Кол-во уровней)
-  float voltage = averageAdc * (VREF / DIVISOR);
-  
-  return voltage;
-}
+ 

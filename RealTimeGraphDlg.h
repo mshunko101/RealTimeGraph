@@ -46,7 +46,7 @@ struct PatternTemplate {
     std::vector<double> signal;
     double threshold = 1.00; // Порог схожести (0.0 - 1.0)
 
-    PatternTemplate(const CString& n, double thresh = 0.99999) : name(n), threshold(thresh) {}
+    PatternTemplate(const CString& n, double thresh = 1.0) : name(n), threshold(thresh) {}
 };
 
 class CRealTimeGraphDlg : public CDialogEx

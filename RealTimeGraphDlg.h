@@ -10,9 +10,13 @@
 #include <vector>
 #include <mutex>
 #include <string>
-#include <cmath>
+#include <deque>
 #include <algorithm>
-
+#include <map>
+#include <algorithm>
+#include <cstdint>
+#include <iomanip>
+#include <iostream>
 // Структура одной точки данных
 struct DataPoint {
     double timeSec;
@@ -43,10 +47,12 @@ struct PatternData {
 // Структура шаблона для Pattern Matching
 struct PatternTemplate {
     CString name;
-    std::vector<double> signal;
+    std::deque<bool> signal;
     double threshold = 1.00; // Порог схожести (0.0 - 1.0)
-
-    PatternTemplate(const CString& n, double thresh = 1.0) : name(n), threshold(thresh) {}
+    double currentScore;   // <--- НОВОЕ: текущий процент схожести (0.0 - 1.0)
+    double maxScore = 100;     // Максимум очков (например, длина шаблона * 10)
+    bool isActive = false;   // Флаг: реально ли сейчас идет этот сигнал
+    PatternTemplate(const CString& n, double thresh = 1.0) : name(n), threshold(thresh), currentScore(0), maxScore(100){}
 };
 
 class CRealTimeGraphDlg : public CDialogEx
@@ -72,12 +78,11 @@ public:
 public:
     // Статистика
     StatsResult m_lastStats;
-
+    void ProcessBit(bool bitValue);
     // Pattern Matching (Обучение)
-    bool m_bRecordingTemplate = false;
     int m_recordCount = 0;
     const int TEMPLATE_LENGTH = 30; // Сколько точек нужно для шаблона
-    std::vector<double> m_tempRecordingBuffer;
+    std::deque<bool> m_bitBuffer;
     std::vector<PatternTemplate> m_templates;
 public:
     // Элементы управления (переменные)
@@ -96,11 +101,19 @@ public:
     DECLARE_MESSAGE_MAP()
      
 public:
+
     // Логика работы
     void ParseAndStoreData(const CString& line);
     StatsResult CalculateRegressionAndNormality();
     bool IsAnomalyDetected(const StatsResult& stats);
     void CheckAndActOnPatterns(); // Главная функция поиска паттернов
+    // В секции private класса CRealTimeGraphDlg
+private:          // Буфер последних битов
+    bool m_bRecordingTemplate;             // Флаг записи шаблона
+    std::deque<bool> m_tempRecordingBuffer;// Временный буфер для записи
+
+     void CheckBitPatterns();               // Поиск совпадений
+    void InitDefaultPatterns();           // Инициализация шаблонов
 
     // Действия
     void PerformAction(const CString& reason);

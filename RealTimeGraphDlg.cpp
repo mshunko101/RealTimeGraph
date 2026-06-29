@@ -1,14 +1,16 @@
-﻿
-// RealTimeGraphDlg.cpp: файл реализации
-//
+﻿// RealTimeGraphDlg.cpp: файл реализации
+// Адаптировано для работы с битовым потоком (0/1) и поиском битовых паттернов
 
 #include "pch.h"
 #include "framework.h"
 #include "RealTimeGraph.h"
 #include "RealTimeGraphDlg.h"
 #include "afxdialogex.h"
-#include <commctrl.h> // Для работы с COM портом
+#include <commctrl.h>
 #include <thread>
+#include <deque>
+#include <algorithm>
+
 #ifdef _DEBUG
 #define new DEBUG_NEW
 #endif
@@ -16,40 +18,37 @@
 #undef min
 #undef max
 
-// Диалоговое окно CRealTimeGraphDlg
-
-
-#include "pch.h"
-#include <commctrl.h>
-#include <fstream>
-
 BEGIN_MESSAGE_MAP(CRealTimeGraphDlg, CDialogEx)
     ON_BN_CLICKED(IDC_BTN_RECORD, &CRealTimeGraphDlg::OnBnClickedBtnRecord)
     ON_WM_TIMER()
     ON_WM_PAINT()
 END_MESSAGE_MAP()
 
-CRealTimeGraphDlg::CRealTimeGraphDlg(CWnd* pParent) : CDialogEx(IDD_REALTIMEGRAPH_DIALOG, pParent) {
-    m_dataBuffer.reserve(BUFFER_SIZE);
-}
 IMPLEMENT_DYNAMIC(CRealTimeGraphDlg, CDialogEx)
+
+CRealTimeGraphDlg::CRealTimeGraphDlg(CWnd* pParent)
+    : CDialogEx(IDD_REALTIMEGRAPH_DIALOG, pParent) {
+
+    m_dataBuffer.reserve(BUFFER_SIZE);
+    m_bitBuffer.clear();
+    m_isCalibrating = false; // Для битов калибровка часто не нужна, но оставлена для совместимости
+    m_isCalibrated = true;   // Считаем, что биты уже готовы к приему
+}
+
 CRealTimeGraphDlg::~CRealTimeGraphDlg() {
     if (m_hComPort != INVALID_HANDLE_VALUE) {
         CloseHandle(m_hComPort);
     }
 }
+
 void CRealTimeGraphDlg::DoDataExchange(CDataExchange* pDX) {
     CDialogEx::DoDataExchange(pDX);
 
     DDX_Control(pDX, IDC_BTN_RECORD, m_btnRecord);
     DDX_Control(pDX, IDC_STATIC_STATUS, m_pStatusText);
-    DDX_Control(pDX, IDC_EDIT_NAME, m_editName);      // Поле ввода имени шаблона
-
-    // Для статуса (CWnd*) нельзя использовать DDX_Control напрямую в старом стиле,
-    // поэтому мы получим его через GetDlgItem в OnInitDialog. 
-    // Но если ты хочешь сделать и для него DDX, нужен специальный макрос, 
-    // проще оставить получение через GetDlgItem (см. Шаг 3).
+    DDX_Control(pDX, IDC_EDIT_NAME, m_editName);
 }
+
 // --- Инициализация портов ---
 bool CRealTimeGraphDlg::OpenComPort(LPCTSTR portName, HANDLE& hCom) {
     hCom = CreateFile(portName, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
@@ -71,7 +70,6 @@ bool CRealTimeGraphDlg::OpenComPort(LPCTSTR portName, HANDLE& hCom) {
     return true;
 }
 
-
 ULONG __stdcall ReadThreadProc(LPVOID pParam) {
     CRealTimeGraphDlg* pDlg = reinterpret_cast<CRealTimeGraphDlg*>(pParam);
     if (!pDlg || !pDlg->m_bConnected) return 1;
@@ -81,7 +79,7 @@ ULONG __stdcall ReadThreadProc(LPVOID pParam) {
     DWORD written = 0;
 
     while (pDlg->m_bConnected && pDlg->m_hComPort != INVALID_HANDLE_VALUE) {
-        // Протокол: MFC шлет "SEND_DATA", Arduino отвечает строкой
+        // Протокол: MFC шлет "SEND_DATA", Arduino отвечает строкой битов ("0", "1" или "10101")
         const char* req = "SEND_DATA\n";
         WriteFile(pDlg->m_hComPort, req, strlen(req), &written, NULL);
 
@@ -92,390 +90,224 @@ ULONG __stdcall ReadThreadProc(LPVOID pParam) {
                 line.Replace(_T("\r"), _T(""));
                 line.Replace(_T("\n"), _T(""));
 
-                // --- ГЛАВНОЕ ИЗМЕНЕНИЕ ЗДЕСЬ ---
-
-                if (pDlg->m_isCalibrating) {
-                    // РЕЖИМ КАЛИБРОВКИ: Просто собираем сырые данные
-                    double rawValue = 0.0;
-
-                    // Парсим значение (предполагаем формат "OK,123,2.5" или просто число)
-                    // Адаптируй парсинг под твой текущий ParseAndStoreData, если он сложнее
-                    int commaPos = line.Find(_T(","));
-                    if (commaPos != -1) {
-                        CString valStr = line.Mid(commaPos + 1);
-                        // Если там два числа через запятую, берем первое (raw)
-                        int nextComma = valStr.Find(_T(","));
-                        if (nextComma != -1) valStr = valStr.Left(nextComma);
-
-                        rawValue = _tcstod(valStr, nullptr);
-                    }
-                    else {
-                        // Если формат просто число
-                        rawValue = _tcstod(line, nullptr);
-                    }
-
-                    pDlg->m_calibrationBuffer.push_back(rawValue);
-
-                    // Проверка: набрали ли нужное количество точек?
-                    if ((int)pDlg->m_calibrationBuffer.size() >= pDlg->CALIB_SAMPLES) {
-                        // Считаем среднее (это и есть наш "ноль")
-                        double sum = 0.0;
-                        for (double v : pDlg->m_calibrationBuffer) {
-                            sum += v;
-                        }
-                        pDlg->m_baselineOffset = sum / pDlg->m_calibrationBuffer.size();
-
-                        // Сбрасываем флаги
-                        pDlg->m_isCalibrating = false;
-                        pDlg->m_isCalibrated = true;
-                        pDlg->m_calibrationBuffer.clear();
-
-
-                        // Опционально: можно обновить статус бар здесь
-                        if (pDlg->m_pStatusText) {
-                            pDlg->m_pStatusText.SetWindowText(_T("Статус: Калибровано. Готов к работе."));
-                        }
-                    }
-
-                    // Важно: в режиме калибровки НЕ вызываем ParseAndStoreData,
-                    // чтобы не рисовать мусор и не портить шаблоны.
-                    Sleep(40);
+                if (line.IsEmpty()) {
+                    Sleep(5); // Небольшая пауза, если пусто
                     continue;
                 }
 
-                // --- ОБЫЧНЫЙ РЕЖИМ (после калибровки) ---
+                // --- ГЛАВНАЯ ЛОГИКА: Обработка битовой строки ---
 
-                // Если калибровка еще не пройдена, можно игнорировать данные или показать предупреждение
-                if (!pDlg->m_isCalibrated) {
-                    // Можно раскомментировать, если хочешь видеть предупреждение в логе
-                    // (но AfxMessageBox в потоке нельзя! только лог или флаг)
-                    Sleep(40);
-                    pDlg->m_pStatusText.SetWindowTextW(_T("Идет юстировка"));
-                    continue;
+                // ПАРСИНГ БИТ:
+                // Вариант 1: Arduino шлет "0" или "1"
+                // Вариант 2: Arduino шлет строку "10101010"
+
+                bool hasData = false;
+                for (int i = 0; i < line.GetLength(); ++i) {
+                    TCHAR ch = line[i];
+                    if (ch == _T('1')) {
+                        pDlg->ProcessBit(true);
+                        hasData = true;
+                    }
+                    else if (ch == _T('0')) {
+                        pDlg->ProcessBit(false);
+                        hasData = true;
+                    }
+                    // Игнорируем любые другие символы (OK, запятые и т.д.)
                 }
 
-                // Парсим данные как обычно
-                pDlg->ParseAndStoreData(line);
-
-                // ВАЖНО: Внутри ParseAndStoreData (или сразу после) нужно применить вычитание фона.
-                // Смотри инструкцию ниже, как это сделать внутри ParseAndStoreData.
+                if (!hasData) {
+                    // Если строка не содержала 0 или 1, возможно это служебное сообщение
+                    // Можно добавить логирование сюда
+                    AfxMessageBox(_T("НЕТ ДАННЫХ!"));
+                }
             }
         }
-        Sleep(40);
+        // Уменьшено с 40мс до 5мс для надежного захвата битов при 118bps
+        Sleep(5);
     }
     return 0;
 }
 
+// --- Обработка отдельного бита ---
+void CRealTimeGraphDlg::ProcessBit(bool bitValue) {
+    // 1. Добавляем в кольцевой буфер битов
+    m_bitBuffer.push_back(bitValue);
 
-// --- Парсинг строки от Arduino "OK,512,1.650" ---
-void CRealTimeGraphDlg::ParseAndStoreData(const CString& line) {
-    if (line.Find(_T("OK,")) != 0) return;
-
-
-    double rawValue = 0.0;
-    // ... твой код парсинга ...
-    // Например:
-    int commaPos = line.Find(_T(","));
-    if (commaPos != -1) {
-        CString sub = line.Mid(commaPos + 1);
-        int nextComma = sub.Find(_T(","));
-        if (nextComma != -1) sub = sub.Left(nextComma);
-        rawValue = _tcstod(sub, nullptr);
-    }
-    else {
-        rawValue = _tcstod(line, nullptr);
-    }
-    // 2. ПРИМЕНЕНИЕ КАЛИБРОВКИ (ЮСТИРОВКА)
-    // Вычитаем найденный ноль. Теперь сигнал колеблется вокруг 0.
-    double volts = rawValue - m_baselineOffset;
-    static std::vector<double> smoothWindow;
-    const int WINDOW_SIZE = 7; // Нечётное число
-
-    smoothWindow.push_back(volts);
-    if ((int)smoothWindow.size() > WINDOW_SIZE) {
-        smoothWindow.erase(smoothWindow.begin());
+    // Ограничиваем историю (например, последние 512 бит)
+    const int MAX_BIT_HISTORY = 512;
+    if ((int)m_bitBuffer.size() > MAX_BIT_HISTORY) {
+        m_bitBuffer.pop_front();
     }
 
-    double smoothedVolts = 0.0;
-    for (double v : smoothWindow) smoothedVolts += v;
-    smoothedVolts /= smoothWindow.size();
-
+    // 2. Обновляем буфер для графика (конвертируем бит в double 0.0/1.0)
+    double voltsForGraph = bitValue ? 1.0 : 0.0;
     {
         std::lock_guard<std::mutex> lock(m_bufferMutex);
-
         DataPoint pt;
         pt.timeSec = GetTickCount() / 1000.0;
-        pt.valueVolts = smoothedVolts;
+        pt.valueVolts = voltsForGraph;
         m_dataBuffer.push_back(pt);
 
-        // Кольцевой буфер: удаляем старые
         if (m_dataBuffer.size() > BUFFER_SIZE) {
             m_dataBuffer.erase(m_dataBuffer.begin());
         }
     }
-
-    // ЛОГИКА ЗАПИСИ ШАБЛОНА
     if (m_bRecordingTemplate) {
-        m_tempRecordingBuffer.push_back(smoothedVolts);
+        m_tempRecordingBuffer.push_back(bitValue);
         m_recordCount++;
-
-        if (m_recordCount >= TEMPLATE_LENGTH) {
-            // Автосохранение шаблона
+    }
+    // 3. Проверка паттернов (выполняется каждый раз при получении нового бита)
+    CheckBitPatterns();
+    const int MAX_RECORD_LENGTH = 128;
+    if (m_recordCount >= MAX_RECORD_LENGTH) {
+        // Автоматически останавливаем запись, если набрали лимит
+        m_bRecordingTemplate = false;
+         
+        if (!m_tempRecordingBuffer.empty()) {
             CString name;
             m_editName.GetWindowText(name);
             if (name.IsEmpty()) name = _T("Auto_Pattern");
 
             PatternTemplate newPat(name);
-            newPat.signal = m_tempRecordingBuffer;
+            newPat.signal = m_tempRecordingBuffer; // Сохраняем вектор bool
+            newPat.threshold = 1.0; // Для битов совпадение должно быть полным
+
             m_templates.push_back(newPat);
 
-            m_bRecordingTemplate = false;
-            m_recordCount = 0;
-            m_tempRecordingBuffer.clear();
-
             if (m_pStatusText) {
                 CString msg;
-                msg.Format(_T("ШАБЛОН '%s' СОХРАНЕН (%d точек). Всего шаблонов: %d"),
-                    name, newPat.signal.size(), (int)m_templates.size());
+                msg.Format(_T("Шаблон '%s' сохранен (%d бит). Всего шаблонов: %d"),
+                    name, (int)newPat.signal.size(), (int)m_templates.size());
                 m_pStatusText.SetWindowText(msg);
             }
 
-            // Переключаем кнопку обратно на "Начать запись"
-            m_btnRecord.SetWindowText(_T("Начать запись шаблона"));
+            m_tempRecordingBuffer.clear();
+            m_recordCount = 0;
+
+             
         }
         else {
-            if (m_pStatusText) {
-                CString msg;
-                msg.Format(_T("Запись шаблона... собрано %d/%d точек"), m_recordCount, TEMPLATE_LENGTH);
-                m_pStatusText.SetWindowText(msg);
+            if (m_pStatusText) m_pStatusText.SetWindowText(_T("Запись отменена (нет данных)"));
+        }
+
+
+        if (m_bRecordingTemplate) {
+            // Завершаем запись 
+            m_btnRecord.SetWindowText(_T("Начать запись шаблона"));
+        }
+        else { 
+            m_btnRecord.SetWindowText(_T("Идет запись..."));
+            if (m_pStatusText) m_pStatusText.SetWindowText(_T("РЕЖИМ ЗАПИСИ: Сделайте событие сейчас!"));
+        }
+
+
+        // Тут можно сразу вызвать логику сохранения, как в кнопке,
+        // или просто ждать, пока пользователь нажмет кнопку, чтобы дать имя.
+        // Самый простой вариант: просто выключаем флаг, а сохранение делаем по кнопке.
+
+        if (m_pStatusText)
+            m_pStatusText.SetWindowText(_T("Лимит битов достигнут. Нажмите кнопку для сохранения."));
+    }
+    // Запрос перерисовки графика
+    InvalidateRect(NULL, FALSE);
+}
+
+// --- Поиск битовых паттернов ---
+    void CRealTimeGraphDlg::CheckBitPatterns() {
+        if (m_bitBuffer.empty()) return;
+
+        for (auto& pat : m_templates) {
+            size_t len = pat.signal.size();
+            if (len > m_bitBuffer.size()) {
+                pat.currentScore = std::max(0.0, pat.currentScore - 2); // Если данных мало, очки тают (шум уходит)
+                continue;
+            }
+
+            // 1. Считаем совпадение последних N бит
+            size_t start = m_bitBuffer.size() - len;
+            int matches = 0;
+            for (size_t i = 0; i < len; ++i) {
+                if (m_bitBuffer[start + i] == pat.signal[i]) matches++;
+            }
+            double ratio = (double)matches / len;
+
+            // 2. Логика начисления очков (Гистерезис)
+            if (ratio > 0.61) {
+                // Очень похоже -> ДАЕМ МНОГО ОЧКОВ
+                pat.currentScore += 15;
+            }
+            else if (ratio < 0.2) {
+                // Совсем не похоже -> ОТНИМАЕМ ОЧКИ (это точно шум)
+                pat.currentScore -= 10;
+            }
+            else {
+                // Средне -> чуть снижаем, чтобы случайное совпадение не накопилось
+                pat.currentScore -= 2;
+            }
+
+            // Ограничиваем очки рамками [0, maxScore]
+            pat.currentScore = std::clamp(pat.currentScore, 0.0, pat.maxScore);
+
+            // 3. ПРИНЯТИЕ РЕШЕНИЯ
+            // Срабатываем, только если набрали 90% очков И раньше не срабатывали
+            if (pat.currentScore >= pat.maxScore * 0.9 && !pat.isActive) {
+                PerformAction(pat.name); // <-- ВОТ ЗДЕСЬ МЫ ПОНЯЛИ, ЧТО ЭТО ДАННЫЕ, А НЕ ШУМ
+                pat.isActive = true;
+                TRACE(_T("Обнаружен ПАТТЕРН %s!\n"), pat.name);
+            }
+
+            // Если очки упали ниже 30% от максимума -> сбрасываем флаг активности
+            if (pat.currentScore < pat.maxScore * 0.3) {
+                pat.isActive = false;
             }
         }
     }
-    else {
-        // Если не запись, просто обновляем статус
-        if (m_pStatusText && m_pStatusText.GetWindowTextLength() == 0) {
-            m_pStatusText.SetWindowText(_T("Ожидание данных..."));
-        }
-    }
 
-    InvalidateRect(NULL, FALSE); // Запрос перерисовки
-}
-std::vector<double> NormalizeVector(const std::vector<double>& vec) {
-    if (vec.empty()) return vec;
-
-    double minVal = *std::min_element(vec.begin(), vec.end());
-    double maxVal = *std::max_element(vec.begin(), vec.end());
-    double range = maxVal - minVal;
-
-    if (range < 1e-6) return vec; // Защита от деления на ноль
-
-    std::vector<double> normalized;
-    normalized.reserve(vec.size());
-    for (double v : vec) {
-        normalized.push_back((v - minVal) / range);
-    }
-    return normalized;
-}
-
-// --- МАТЕМАТИКА: Регрессия и Статистика ---
-StatsResult CRealTimeGraphDlg::CalculateRegressionAndNormality() {
-    StatsResult res;
-    res.isValid = false;
-
-    std::lock_guard<std::mutex> lock(m_bufferMutex);
-    if (m_dataBuffer.size() < 10) return res;
-
-    int n = static_cast<int>(m_dataBuffer.size());
-    const int WINDOW_SIZE = 50;
-    int startIdx = std::max(0, n - WINDOW_SIZE);
-    int count = n - startIdx;
-    if (count < 10) return res;
-
-    std::vector<double> x(count), y(count);
-    for (int i = 0; i < count; ++i) {
-        x[i] = m_dataBuffer[startIdx + i].timeSec;
-        y[i] = m_dataBuffer[startIdx + i].valueVolts;
-    }
-
-    double sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
-    for (int i = 0; i < count; ++i) {
-        sumX += x[i]; sumY += y[i];
-        sumXY += x[i] * y[i]; sumXX += x[i] * x[i];
-    }
-
-    double meanX = sumX / count;
-    double meanY = sumY / count;
-
-    double num = sumXY - (sumX * sumY) / count;
-    double den = sumXX - (sumX * sumX) / count;
-
-    if (std::abs(den) < 1e-9) { res.slope = 0; res.intercept = meanY; }
-    else {
-        res.slope = num / den;
-        res.intercept = meanY - res.slope * meanX;
-    }
-
-    double ssTot = 0, ssRes = 0;
-    for (int i = 0; i < count; ++i) {
-        double yPred = res.slope * x[i] + res.intercept;
-        ssRes += (y[i] - yPred) * (y[i] - yPred);
-        ssTot += (y[i] - meanY) * (y[i] - meanY);
-    }
-    res.rSquared = (ssTot == 0) ? 1.0 : 1.0 - (ssRes / ssTot);
-
-    // Остатки
-    std::vector<double> resids(count);
-    double sumR = 0;
-    for (int i = 0; i < count; ++i) {
-        resids[i] = y[i] - (res.slope * x[i] + res.intercept);
-        sumR += resids[i];
-    }
-    double meanR = sumR / count;
-
-    double sqSum = 0;
-    for (double r : resids) sqSum += (r - meanR) * (r - meanR);
-    res.stdDev = std::sqrt(sqSum / count);
-
-    if (res.stdDev < 1e-6) { res.skewness = 0; res.kurtosis = 3; res.isValid = true; return res; }
-
-    double m3 = 0, m4 = 0;
-    for (double r : resids) {
-        double z = (r - meanR) / res.stdDev;
-        m3 += z * z * z;
-        m4 += z * z * z * z;
-    }
-    res.skewness = m3 / count;
-    res.kurtosis = m4 / count;
-    res.isValid = true;
-    return res;
-}
-
-bool CRealTimeGraphDlg::IsAnomalyDetected(const StatsResult& stats) {
-    if (!stats.isValid) return false;
-    if (stats.rSquared < 0.75) return true;
-    if (std::abs(stats.skewness) > 1.2) return true;
-    if (stats.kurtosis < 1.5 || stats.kurtosis > 6.0) return true;
-    return false;
-}
-
-// --- PATTERN MATCHING: Поиск шаблонов ---
-double CalculateCorrelation(const std::vector<double>& data, const std::vector<double>& pattern) {
-    int n = pattern.size();
-    if ((int)data.size() < n) return 0.0;
-
-    double meanD = 0, meanP = 0;
-    for (int i = 0; i < n; ++i) {
-        meanD += data[data.size() - n + i];
-        meanP += pattern[i];
-    }
-    meanD /= n; meanP /= n;
-
-    double num = 0, d1 = 0, d2 = 0;
-    for (int i = 0; i < n; ++i) {
-        double d = data[data.size() - n + i] - meanD;
-        double p = pattern[i] - meanP;
-        num += d * p;
-        d1 += d * d;
-        d2 += p * p;
-    }
-    if (d1 == 0 || d2 == 0) return 0.0;
-    return num / (std::sqrt(d1) * std::sqrt(d2));
-}
-
-// --- Проверка шаблонов и выполнение действий ---
-void CRealTimeGraphDlg::CheckAndActOnPatterns() {
-    if (m_templates.empty()) return;
-
-    std::lock_guard<std::mutex> lock(m_bufferMutex);
-
-    // Собираем только значения вольт в плоский вектор для корреляции
-    std::vector<double> currentSignal;
-    currentSignal.reserve(m_dataBuffer.size());
-    for (const auto& pt : m_dataBuffer) {
-        currentSignal.push_back(pt.valueVolts);
-    }
-
-     
-    bool foundAny = false;
-    for (const auto& temp : m_templates) {
-        if ((int)currentSignal.size() < (int)temp.signal.size()) continue;
-
-        // 1. Берём хвост текущего сигнала такой же длины, как шаблон
-        std::vector<double> signalTail;
-        int startIdx = currentSignal.size() - temp.signal.size();
-        for (size_t i = startIdx; i < currentSignal.size(); ++i) {
-            signalTail.push_back(currentSignal[i]);
-        }
-
-        // 2. НОРМАЛИЗУЕМ ОБА ВЕКТОРА
-        auto normSignal = NormalizeVector(signalTail);
-        auto normPattern = NormalizeVector(temp.signal);
-
-        // 3. Считаем корреляцию уже на нормализованных данных
-        double corr = CalculateCorrelation(normSignal, normPattern);
-
-        if (corr > temp.threshold) {
-            // СРАБОТАЛО! Теперь это сработает и на слабом, и на сильном нажатии
-            PerformAction(temp.name);
-        }
-    }
-
-    // Если ничего не найдено, можно сбросить статус, если нужно
-    if (!foundAny && m_pStatusText && m_pStatusText.GetWindowTextLength() > 0) {
-        // Опционально: раскомментируй, если хочешь видеть "Норма" всегда
-        // m_pStatusText.SetWindowText(_T("Норма")); 
-    }
-}
-
-// --- Действие при срабатывании (сюда вставляй свою логику) ---
+// --- Действие при срабатывании ---
 void CRealTimeGraphDlg::PerformAction(const CString& reason) {
-    // 1. Звуковой сигнал (системный)
     MessageBeep(MB_ICONEXCLAMATION);
 
-    // 2. Логирование в файл
     CFile file;
-    // ВАЖНО: modeCreate + modeWrite + modeNoTruncate = APPEND
     UINT openFlags = CFile::modeCreate | CFile::modeWrite | CFile::modeNoTruncate;
 
-    if (file.Open(_T("sensor_alerts.log"), openFlags)) {
+    if (file.Open(_T("bit_alerts.log"), openFlags)) {
         CString logEntry;
         CTime now = CTime::GetCurrentTime();
-
-        // Формируем строку. В ANSI каждый символ = 1 байт.
         logEntry.Format(_T("[%s] ТРЕВОГА: %s\r\n"),
             now.Format("%Y-%m-%d %H:%M:%S"),
             reason);
         file.SeekToEnd();
-        // Пишем ровно столько байт, сколько символов в строке (для ANSI)
-        file.Write(logEntry, logEntry.GetLength()*2);
-
+        file.Write(logEntry, logEntry.GetLength() * 2); // Unicode
         file.Close();
-
     }
 
-    // 3. Отправка команды обратно на Arduino (если нужно остановить процесс)
-    // Пример: шлём "ALERT" на порт
+    // Отправка команды обратно на Arduino
     if (m_bConnected && m_hComPort != INVALID_HANDLE_VALUE) {
         const char* cmd = "ALARM\n";
         DWORD written = 0;
         WriteFile(m_hComPort, cmd, strlen(cmd), &written, NULL);
     }
 
-    // 4. Визуальный эффект (можно сделать мигание кнопки или цвета, 
-    // но проще пока оставить сообщение в статусе, которое мы уже поставили)
+    if (m_pStatusText) {
+        CString msg;
+        msg.Format(_T("СРАБОТАЛО: %s"), reason);
+        m_pStatusText.SetWindowText(msg);
+    }
 }
 
 // --- Обработчики кнопок ---
 
 void CRealTimeGraphDlg::OnBnClickedBtnConnect() {
-    CString portName; 
-    portName.Insert(0, _T("COM6"));
+    CString portName;
+    portName.Insert(0, _T("COM6")); // Замени на авто-поиск или ввод пользователя
 
     if (OpenComPort(portName, m_hComPort)) {
         m_bConnected = true;
-
         // Запускаем поток чтения
         CreateThread(NULL, 0, ReadThreadProc, this, 0, NULL);
+
+        if (m_pStatusText)
+            m_pStatusText.SetWindowText(_T("Порт открыт. Ожидание данных..."));
     }
     else {
         AfxMessageBox(_T("Не удалось открыть порт! Проверьте номер COM-порта."));
@@ -483,50 +315,24 @@ void CRealTimeGraphDlg::OnBnClickedBtnConnect() {
 }
 
 void CRealTimeGraphDlg::OnBnClickedBtnStart() {
-    SetTimer(1, 8, NULL); // Таймер каждые 50 мс (20 Гц)
+    // Таймер для перерисовки и статистики (если нужна)
+    SetTimer(1, 50, NULL);
 }
 
-void CRealTimeGraphDlg::OnBnClickedBtnRecord() {
-    // Переключатель режима записи
-    if (m_bRecordingTemplate) {
-        // Если уже записываем - отменяем (хотя авто-стоп должен сработать сам)
-        m_bRecordingTemplate = false;
-        m_tempRecordingBuffer.clear();
-        m_recordCount = 0;
-        m_btnRecord.SetWindowText(_T("Начать запись шаблона"));
-        if (m_pStatusText) m_pStatusText.SetWindowText(_T("Запись отменена"));
-    }
-    else {
-        // Начинаем запись
-        m_bRecordingTemplate = true;
-        m_tempRecordingBuffer.clear();
-        m_recordCount = 0;
-        m_btnRecord.SetWindowText(_T("Идет запись..."));
-        if (m_pStatusText) m_pStatusText.SetWindowText(_T("РЕЖИМ ЗАПИСИ: Сделайте событие сейчас!"));
-    }
-}
-
-// --- Таймер: главный цикл обработки ---
+ 
+// --- Таймер ---
 void CRealTimeGraphDlg::OnTimer(UINT_PTR nIDEvent) {
     if (nIDEvent == 1) {
-        // 1. Считаем статистику (регрессия, R^2, асимметрия)
-        m_lastStats = CalculateRegressionAndNormality();
+        // Здесь можно добавить легкую статистику, если нужно
+        // Например, подсчет частоты переключения битов
 
-        // 2. Проверка на аномалии (статистический шум)
-        if (IsAnomalyDetected(m_lastStats)) {
-        //    PerformAction(_T("Статистическая аномалия (R^2 низкий или высокая асимметрия)"));
-        }
-
-        // 3. Поиск шаблонов (Pattern Matching)
-        CheckAndActOnPatterns();
-
-        // Перерисовка графика
-        InvalidateRect(NULL, FALSE);
+        // Перерисовка уже вызывается в ProcessBit, но можно форсировать здесь
+         InvalidateRect(NULL, FALSE); 
     }
     CDialogEx::OnTimer(nIDEvent);
 }
 
-// --- Отрисовка графика (GDI) ---
+// --- Отрисовка графика ---
 void CRealTimeGraphDlg::OnPaint() {
     CPaintDC dc(this);
     CRect rect;
@@ -546,27 +352,21 @@ void CRealTimeGraphDlg::OnPaint() {
     dc.MoveTo(margin, rect.bottom - margin);
     dc.LineTo(rect.right - margin, rect.bottom - margin);
 
-    // Подписи осей (упрощенно)
+    // Подписи
     dc.TextOut(margin - 20, rect.bottom - margin - 15, _T("0"));
-    dc.TextOut(margin - 30, margin, _T("Max"));
+    dc.TextOut(margin - 30, margin, _T("1"));
 
     std::lock_guard<std::mutex> lock(m_bufferMutex);
-    if (m_dataBuffer.empty()) return;
-
-    // Находим мин/макс для масштабирования
-    double minV = m_dataBuffer[0].valueVolts;
-    double maxV = m_dataBuffer[0].valueVolts;
-    for (const auto& p : m_dataBuffer) {
-        if (p.valueVolts < minV) minV = p.valueVolts;
-        if (p.valueVolts > maxV) maxV = p.valueVolts;
+    if (m_dataBuffer.empty()) {
+        dc.TextOut(margin, rect.bottom / 2, _T("Нет данных"));
+        return;
     }
-    // Небольшой запас по вертикали
-    double range = maxV - minV;
-    if (range < 0.1) range = 1.0;
-    minV -= range * 0.1;
-    maxV += range * 0.1;
 
-    // Рисуем точки/линии
+    // Для битового графика мин/макс всегда 0 и 1 (или чуть больше для запаса)
+    double minV = -0.1;
+    double maxV = 1.1;
+    double range = maxV - minV;
+
     CPen penGreen(PS_SOLID, 2, RGB(0, 150, 0));
     dc.SelectObject(&penGreen);
 
@@ -577,9 +377,17 @@ void CRealTimeGraphDlg::OnPaint() {
         double t = m_dataBuffer[i].timeSec;
         double v = m_dataBuffer[i].valueVolts;
 
-        // Нормализация координат
-        int x = margin + static_cast<int>((t - m_dataBuffer.front().timeSec)) * (width / (m_dataBuffer.back().timeSec - m_dataBuffer.front().timeSec + 0.001));
-        int y = rect.bottom - margin - static_cast<int>(((v - minV) / (maxV - minV)) * height);
+        // Расчет X: время относительно начала буфера
+        double totalTime = m_dataBuffer.back().timeSec - m_dataBuffer.front().timeSec;
+        if (totalTime < 0.001) totalTime = 0.001; // Защита от деления на ноль
+
+        int x = margin + static_cast<int>(((t - m_dataBuffer.front().timeSec) / totalTime) * width);
+        // Обрезаем X, чтобы не вылезало за границы при резких скачках времени
+        if (x < margin) x = margin;
+        if (x > rect.right - margin) x = rect.right - margin;
+
+        // Расчет Y: инвертируем, так как в GDI Y растет вниз
+        int y = rect.bottom - margin - static_cast<int>(((v - minV) / range) * height);
 
         CPoint currPoint(x, y);
 
@@ -593,36 +401,120 @@ void CRealTimeGraphDlg::OnPaint() {
         prevPoint = currPoint;
     }
 
-    // ОТРИСОВКА ШАБЛОНОВ (для наглядности: рисуем сохраненные шаблоны полупрозрачно)
+    // Визуализация сохраненных шаблонов (маленькими копиями справа)
     CPen penRed(PS_DASH, 1, RGB(200, 50, 50));
     dc.SelectObject(&penRed);
 
-    for (const auto& temp : m_templates) {
-        // Рисуем шаблон поверх графика (упрощенно: просто ломаная из точек шаблона)
-        // Тут нужна дополнительная логика маппинга времени, но для простоты 
-        // можно рисовать его в углу или просто знать, что он есть.
-        // Для демо нарисуем маленькую копию шаблона справа внизу:
-        int startX = rect.right - margin - 80;
-        int startY = rect.bottom - margin - 60;
+    int startX = rect.right - margin - 60;
+    int startY = rect.bottom - margin - 40;
+    int stepX = 4;
+    int plotHeight = 30;
 
-        dc.MoveTo(startX, startY);
+    for (const auto& temp : m_templates) {
+        // Отрисовка миниатюры шаблона (красная пунктирная линия)
+        int tempX = startX;
+        int baseY = startY;
+
         for (size_t i = 0; i < temp.signal.size(); ++i) {
-            int px = startX + (i * 3); // Сжимаем по X
-            int py = startY - static_cast<int>(((temp.signal[i] - minV) / (maxV - minV + 0.001)) * 40); // Масштабируем по Y
-            dc.LineTo(px, py);
-            dc.MoveTo(px, py); // Сброс для следующей линии, если бы рисовали отдельно
+            // Рисуем столбик для каждого бита
+            int h = (temp.signal[i] ? plotHeight : 0);
+            CRect r(tempX, baseY - h, tempX + stepX, baseY);
+
+            if (temp.signal[i]) {
+                dc.FillSolidRect(&r, RGB(255, 200, 200)); // Светло-красный фон для единицы
+                dc.Rectangle(&r); // Контур
+            }
+            // Ноль просто не рисуем (пустое место), чтобы видеть форму
+
+            tempX += stepX;
+            if (tempX > rect.right - margin) break; // Не вылезать за экран
         }
-        // Примечание: отрисовка шаблонов прямо на основном графике требует сложной привязки ко времени.
-        // Лучше просто доверять тексту статуса. Этот блок - просто визуальная "фишка".
+
+        // Подпись имени шаблона под миниатюрой
+        CString nameShort = temp.name;
+        if (nameShort.GetLength() > 10) nameShort = nameShort.Left(10) + _T("...");
+        dc.TextOut(startX, baseY + 10, nameShort);
+
+        startY -= 25; // Сдвиг вниз для следующего шаблона
+        if (startY < margin) break; // Если шаблонов много, не рисуем ниже поля
     }
+
+    // --- ОТРИСОВКА ПРОЦЕНТОВ СХОЖЕСТИ ---
+    if (!m_templates.empty()) {
+        int textStartX = margin;
+        int textY = margin + 10;
+        int lineHeight = 20;
+
+        dc.SetBkMode(TRANSPARENT);
+        dc.SetTextColor(RGB(0, 0, 0));
+
+        // Заголовок
+        dc.TextOut(textStartX, textY, _T("Схожесть паттернов:"));
+        textY += lineHeight;
+
+        for (const auto& temp : m_templates) {
+            CString displayText;
+            // Форматируем: "Имя: 85%"
+            displayText.Format(_T("%s: %d%%"), temp.name, static_cast<int>(temp.currentScore * 100));
+
+            // Цвет текста зависит от процента
+            COLORREF color = RGB(0, 100, 0); // Зеленый по умолчанию
+            if (temp.currentScore > 0.8) color = RGB(255, 255, 0); // Желтый (близко к срабатыванию)
+            if (temp.currentScore >= temp.threshold) color = RGB(255, 50, 50); // Красный (сработало)
+
+            dc.SetTextColor(color);
+            dc.TextOut(textStartX, textY, displayText);
+            textY += lineHeight;
+        }
+
+        dc.SetTextColor(RGB(0, 0, 0)); // Возвращаем черный
+    }
+
+}
+
+// --- Логика записи шаблона (кнопка "Начать запись") ---
+void CRealTimeGraphDlg::OnBnClickedBtnRecord() {
+    if (m_bRecordingTemplate) {
+        // Завершаем запись
+        m_bRecordingTemplate = false;
+        m_btnRecord.SetWindowText(_T("Начать запись шаблона"));
+
+        
+    }
+    else {
+        // Начинаем запись
+        m_bRecordingTemplate = true;
+        m_tempRecordingBuffer.clear();
+        m_recordCount = 0;
+        m_btnRecord.SetWindowText(_T("Идет запись..."));
+        if (m_pStatusText) m_pStatusText.SetWindowText(_T("РЕЖИМ ЗАПИСИ: Сделайте событие сейчас!"));
+    }
+}
+ 
+// --- Вспомогательная функция для инициализации тестовых шаблонов (вызови в конструкторе или OnInitDialog) ---
+void CRealTimeGraphDlg::InitDefaultPatterns() {
+    m_templates.clear();
+
+    // Пример 1: Старт кадра (синхрослово)
+    PatternTemplate p1(_T("Старт кадра"));
+    p1.signal = { 1, 0, 1, 0, 1, 0, 1, 0 };
+    p1.threshold = 1.0;
+    m_templates.push_back(p1);
+
+    // Пример 2: Сигнал тревоги
+    PatternTemplate p2(_T("Тревога"));
+    p2.signal = { 0, 0, 0, 1, 1, 1, 1, 1, 0, 0 };
+    p2.threshold = 1.0;
+    m_templates.push_back(p2);
+
+    // Можно добавить сколько угодно шаблонов любой длины
 }
 
 
 BOOL CRealTimeGraphDlg::OnInitDialog()
 {
+    UpdateData(0);
     OnBnClickedBtnConnect();
     OnBnClickedBtnStart();
-    m_isCalibrating = true;
-    UpdateData(0);
-    return true;
+    return TRUE;
 }

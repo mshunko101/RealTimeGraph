@@ -101,7 +101,7 @@ public:
     DECLARE_MESSAGE_MAP()
      
 public:
-
+    void DrawTemplatePreviews(CDC& dc, const CRect& rect, int margin);
     // Логика работы
     void ParseAndStoreData(const CString& line);
     StatsResult CalculateRegressionAndNormality();

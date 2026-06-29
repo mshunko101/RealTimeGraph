@@ -455,7 +455,7 @@ void CRealTimeGraphDlg::OnPaint() {
         for (const auto& temp : m_templates) {
             CString displayText;
             // Форматируем: "Имя: 85%"
-            displayText.Format(_T("%s: %d%%"), temp.name, static_cast<int>(temp.currentScore * 100));
+            displayText.Format(_T("%s: %d%%"), temp.name, static_cast<int>(temp.currentScore ));
 
             // Цвет текста зависит от процента
             COLORREF color = RGB(0, 100, 0); // Зеленый по умолчанию

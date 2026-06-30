@@ -111,13 +111,13 @@ void loop() {
 
   // 5. Отправка данных в MFC (раз в 10 циклов)
   // Формат: PATTERN:Name:Score
- /* if (bci.getBestScore() >0 && false_log) {
+  if (bci.getBestScore() >0 && false_log) {
     Serial.print(F("PATTERN:"));
     Serial.print(bci.getBestPatternName());
     Serial.print(':');
     Serial.println(bci.getBestScore());
     false_log = false;
-  }*/
+  } 
 
   // 6. Отладка частоты дискретизации (раз в секунду)
   unsigned long now = millis();

@@ -1,9 +1,11 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
-VisualStudioVersion = 17.14.37411.7 d17.14
+VisualStudioVersion = 17.14.37411.7
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "RealTimeGraph", "RealTimeGraph.vcxproj", "{53955832-4CF6-BB03-E437-6511CC7AB5B4}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "BCIController", "BCIController\BCIController.vcxproj", "{C3DD198D-D431-FA2E-46F5-4085F24B4B1D}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -21,6 +23,14 @@ Global
 		{53955832-4CF6-BB03-E437-6511CC7AB5B4}.Release|x64.Build.0 = Release|x64
 		{53955832-4CF6-BB03-E437-6511CC7AB5B4}.Release|x86.ActiveCfg = Release|Win32
 		{53955832-4CF6-BB03-E437-6511CC7AB5B4}.Release|x86.Build.0 = Release|Win32
+		{C3DD198D-D431-FA2E-46F5-4085F24B4B1D}.Debug|x64.ActiveCfg = Debug|x64
+		{C3DD198D-D431-FA2E-46F5-4085F24B4B1D}.Debug|x64.Build.0 = Debug|x64
+		{C3DD198D-D431-FA2E-46F5-4085F24B4B1D}.Debug|x86.ActiveCfg = Debug|Win32
+		{C3DD198D-D431-FA2E-46F5-4085F24B4B1D}.Debug|x86.Build.0 = Debug|Win32
+		{C3DD198D-D431-FA2E-46F5-4085F24B4B1D}.Release|x64.ActiveCfg = Release|x64
+		{C3DD198D-D431-FA2E-46F5-4085F24B4B1D}.Release|x64.Build.0 = Release|x64
+		{C3DD198D-D431-FA2E-46F5-4085F24B4B1D}.Release|x86.ActiveCfg = Release|Win32
+		{C3DD198D-D431-FA2E-46F5-4085F24B4B1D}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

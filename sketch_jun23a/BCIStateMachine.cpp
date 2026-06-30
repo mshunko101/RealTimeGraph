@@ -125,8 +125,8 @@ void BCIStateMachine::checkBitPatterns() {
 void BCIStateMachine::saveCurrentRecording() {
     if (tempRecordingBuffer.empty()) return;
 
-    char name[32];
-    snprintf(name, sizeof(name), "Template_%d", (int)templates.size());
+    char* name = new char[32];
+    snprintf(name, 32, "Template_%d", (int)templates.size());
     
     templates.push_back(PatternTemplate(name, tempRecordingBuffer));
     

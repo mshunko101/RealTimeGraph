@@ -14,7 +14,7 @@ struct PatternTemplate {
     bool isActive;            // Флаг: сработал ли паттерн прямо сейчас
     
     PatternTemplate(const char* n, const std::vector<bool>& s) 
-        : name(n), signal(s), currentScore(0), maxScore((float)s.size()), isActive(false) {}
+        : name(n), signal(s), currentScore(0), maxScore(100), isActive(false) {}
 };
 	enum {CMD_SET_ACTIVE,CMD_RESET_TEMPLATES,CMD_STATUS,CMD_RECORD};
 

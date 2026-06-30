@@ -1,15 +1,14 @@
-/*
- * Скетч: Измерение напряжения на пине A1 (для Vidor 4000 и совместимых)
- * 
- * Особенности:
- * - Усреднение 30 замеров для подавления шума.
- * - Расчет напряжения: U = ADC * (3.3 / 1024).
- * - Вывод в Serial: "ADC: [значение], Voltage: [вольт]".
- * 
- * Подключение:
- * - Сигнал подать на пин A1.
- * - Второй контакт датчика/источника на GND.
- */
+#include "BCIStateMachine.h"
+
+BCIStateMachine bci;
+
+// НАСТРОЙКИ ТАЙМЕРА
+const unsigned long INTERVAL_US = 8550UL; // ~117 Гц (подбирай под свой датчик)
+unsigned long previousMicros = 0;
+
+// Счетчик для отладки частоты
+volatile uint32_t sampleCount = 0;
+unsigned long lastCheckTime = 0;
 const int piezoPin = 5; // выберите любой цифровой пин, совместимый с tone()
 const int sensorPin = A2;
 
@@ -23,21 +22,22 @@ float adaptiveZero = 0.0;
 unsigned long lastTriggerTime = 0; 
 
 void setup() {
-  // Инициализация последовательного порта (9600 бод - стандарт, можно увеличить до 115200)
   Serial.begin(9600);
-  pinMode(piezoPin, OUTPUT);
-  while (!Serial) {
-    ; // Ждем подключения Serial (актуально для некоторых плат при первом запуске)
-  }
+  while (!Serial);
   
-  // Небольшая задержка для стабилизации питания перед первым замером
-  delay(100);
+  Serial.println("BCI_SYSTEM_READY_PATTERN_ENGINE");
+  
+  // Активируем систему
+  bci.processCommand(CMD_SET_ACTIVE); 
 }
-void loop() 
 
-{
-  
-  
+void loop() {
+  unsigned long currentMicros = micros();
+
+  // 1. ЧЕТКИЙ ТАЙМЕР (Гарантирует частоту дискретизации)
+  if (currentMicros - previousMicros >= INTERVAL_US) {
+    previousMicros = currentMicros;
+    
 
    // 1. Читаем датчик
   int rawValue = analogRead(sensorPin);
@@ -61,39 +61,41 @@ void loop()
   }
 
 
+    bci.feedSensorData(shouldOutputOne);
+    sampleCount++;
+  }
 
-if (Serial.available() > 0) {
-    String cmd = Serial.readStringUntil('\n');
-    cmd.trim();
-    
-    if (cmd == "SEND_DATA") {
-      Serial.print("OK,");
-  // Отправляем данные в формате CSV: время,значение
- 
-    Serial.print(now);
-    Serial.print(",");   
-    Serial.println(shouldOutputOne ? 1 : 0);
- 
-  //Serial.println(voltage, 3); // 3 знака после запятой
-    }
-    else {
-      Serial.println("ERROR: Unknown command");
-    }
-  // Если нужно видеть подробный лог, раскомментируйте блок ниже и закомментируйте строку выше:
-  /*
-  Serial.print("Raw ADC (avg): ");
-  Serial.print(adcValue);
-  Serial.print(" | Напряжение: ");
-  Serial.print(voltage, 3);
-  Serial.println(" В");
-  */
-// Интервал между замерами (мс). Не ставьте слишком мало, если используете медленные порты
-}
-  tone(piezoPin, 118); // частота 118 Гц
-  // Если нужно играть ограниченное время, укажите третий параметр:
-  // tone(piezoPin, 118, 2000); // играть 2 секунды
+  // 2. БЫСТРАЯ ОБРАБОТКА КОМАНД (Без String, чтобы не ломать таймер)
+  static char buffer[32];
+  static int bufIndex = 0;
   
-  delay(50);          // пауза 1 секунда (если нужно)
-  noTone(piezoPin);     // выключить звук
-}
+  while (Serial.available()) {
+    char c = Serial.read();
+    if (c == '\n' || c == '\r') {
+      buffer[bufIndex] = '\0';
+      bufIndex = 0;
+      
+      if (strcmp(buffer, "STATUS") == 0) bci.processCommand(CMD_STATUS);
+      else if (strcmp(buffer, "RECORD") == 0) bci.processCommand(CMD_RECORD);
+      else if (strcmp(buffer, "RESET") == 0) bci.processCommand(CMD_RESET_TEMPLATES);
+      else if (strcmp(buffer, "START_ANALYSIS") == 0) bci.processCommand(CMD_SET_ACTIVE);
+      
+    } else {
+      if (bufIndex < 31) buffer[bufIndex++] = c;
+    }
+  }
  
+  // 4. ОТЛАДКА ЧАСТОТЫ (Раз в секунду в монитор порта)
+  unsigned long now = millis();
+  if (now - lastCheckTime >= 1000) {
+    lastCheckTime = now;
+    Serial.print(F("SAMPLES_PER_SEC: "));
+    Serial.println(sampleCount);
+    sampleCount = 0;
+
+    Serial.print(F("PATTERN:"));
+    Serial.print(bci.getBestPatternName());
+    Serial.print(':');
+    Serial.println(bci.getBestScore());
+  }
+}

@@ -102,15 +102,17 @@ ULONG __stdcall ReadThreadProc(LPVOID pParam) {
                 // Вариант 2: Arduino шлет строку "10101010"
 
                 bool hasData = false;
-                for (int i = 0; i < line.GetLength(); ++i) {
+                for (int i = line.GetLength(); i >= 0; i--) {
                     TCHAR ch = line[i];
                     if (ch == _T('1')) {
                         pDlg->ProcessBit(true);
                         hasData = true;
+                        break;
                     }
                     else if (ch == _T('0')) {
                         pDlg->ProcessBit(false);
                         hasData = true;
+                        break;
                     }
                     // Игнорируем любые другие символы (OK, запятые и т.д.)
                 }

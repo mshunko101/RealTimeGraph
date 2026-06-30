@@ -18,7 +18,7 @@
 #define IDC_STATIC_SCORE                1009
 #define IDC_PROGRESS_SCORE              1010
 #define IDC_LIST_LOG                    1011
-
+#define IDC_BTN_CLEAR                   1012
 // Следующие значения по умолчанию для новых объектов
 //
 #ifdef APSTUDIO_INVOKED

@@ -11,6 +11,7 @@ BEGIN_MESSAGE_MAP(CBCIControllerDlg, CDialogEx)
     ON_BN_CLICKED(IDC_BTN_RECORD, &CBCIControllerDlg::OnBnClickedBtnRecord)
     ON_BN_CLICKED(IDC_BTN_SET_TARGET, &CBCIControllerDlg::OnBnClickedBtnSetTarget)
     ON_BN_CLICKED(IDC_BTN_RESET, &CBCIControllerDlg::OnBnClickedBtnReset)
+    ON_BN_CLICKED(IDC_BTN_CLEAR, &CBCIControllerDlg::OnBnClickedBtnClear)
 END_MESSAGE_MAP()
 
 CBCIControllerDlg::CBCIControllerDlg(CWnd* pParent)
@@ -294,4 +295,8 @@ void CBCIControllerDlg::OnBnClickedBtnReset()
     if (!m_bConnected) return;
     SendCommand("RESET");
     AddLogEntry(_T("Templates reset on Arduino."));
+}
+void CBCIControllerDlg::OnBnClickedBtnClear()
+{
+    m_listLog.DeleteAllItems();
 }

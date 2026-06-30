@@ -38,6 +38,7 @@ public:
     afx_msg void OnBnClickedBtnRecord();
     afx_msg void OnBnClickedBtnSetTarget();
     afx_msg void OnBnClickedBtnReset();
+    afx_msg void OnBnClickedBtnClear();
 
     void OnTimer(UINT_PTR nIDEvent);
 

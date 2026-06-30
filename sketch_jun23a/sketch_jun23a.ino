@@ -3,8 +3,24 @@
 BCIStateMachine bci;
 
 // НАСТРОЙКИ ТАЙМЕРА
-const unsigned long INTERVAL_US = 8550UL; // ~117 Гц (подбирай под свой датчик)
+const unsigned long INTERVAL_US = 8475UL; // ~117 Гц (подбирай под свой датчик)
 unsigned long previousMicros = 0;
+
+
+
+
+const int SOUND_PIN = 5; // Выбери любой PWM пин (на SAMD21 почти все пины PWM)
+
+// Переменные для генерации тона вручную
+unsigned long lastSoundToggleTime = 0;
+const unsigned long SOUND_PERIOD_US = 4237UL; // 1000000 / (118 * 2) ~ 4237 мкс
+bool soundState = LOW;
+
+bool isSoundActive = true; // Флаг: играть звук или нет
+
+
+
+
 
 // Счетчик для отладки частоты
 volatile uint32_t sampleCount = 0;
@@ -30,7 +46,7 @@ void setup() {
   // Активируем систему
   bci.processCommand(CMD_SET_ACTIVE); 
 }
-
+bool false_log = true;
 void loop() {
   unsigned long currentMicros = micros();
 
@@ -65,7 +81,9 @@ void loop() {
     sampleCount++;
   }
 
-  // 2. БЫСТРАЯ ОБРАБОТКА КОМАНД (Без String, чтобы не ломать таймер)
+
+
+ // 3. Обработка команд от MFC (парсинг строк)
   static char buffer[32];
   static int bufIndex = 0;
   
@@ -80,22 +98,36 @@ void loop() {
       else if (strcmp(buffer, "RESET") == 0) bci.processCommand(CMD_RESET_TEMPLATES);
       else if (strcmp(buffer, "START_ANALYSIS") == 0) bci.processCommand(CMD_SET_ACTIVE);
       
+      // Обработка команды установки цели для добавления примера: SET_TARGET:0, SET_TARGET:1...
+      else if (strncmp(buffer, "SET_TARGET:", 11) == 0) {
+          int idx = atoi(buffer + 11);
+          bci.setTargetTemplate(idx);
+      }
+      
     } else {
       if (bufIndex < 31) buffer[bufIndex++] = c;
     }
   }
- 
-  // 4. ОТЛАДКА ЧАСТОТЫ (Раз в секунду в монитор порта)
-  unsigned long now = millis();
-  if (now - lastCheckTime >= 1000) {
-    lastCheckTime = now;
-    Serial.print(F("SAMPLES_PER_SEC: "));
-    Serial.println(sampleCount);
-    sampleCount = 0;
 
+  // 5. Отправка данных в MFC (раз в 10 циклов)
+  // Формат: PATTERN:Name:Score
+ /* if (bci.getBestScore() >0 && false_log) {
     Serial.print(F("PATTERN:"));
     Serial.print(bci.getBestPatternName());
     Serial.print(':');
     Serial.println(bci.getBestScore());
+    false_log = false;
+  }*/
+
+  // 6. Отладка частоты дискретизации (раз в секунду)
+  unsigned long now = millis();
+  if (now - lastCheckTime >= 1000) {
+    lastCheckTime = now;
+   // Serial.print(F("SAMPLES_PER_SEC: "));
+   // Serial.println(sampleCount);
+    sampleCount = 0;
+    false_log = true;
   }
+
+tone(5, 118,100); 
 }

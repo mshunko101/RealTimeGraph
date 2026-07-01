@@ -6,7 +6,7 @@
 const int WINDOW_SIZE = 118;      // Полное окно анализа (1 сек)
 const int CHUNK_SIZE = 5;         // Группа по 5 бит
 const int MAX_TEMPLATES = 5;      
-const int SCORE_THRESHOLD = 80;   // Порог срабатывания
+const int SCORE_THRESHOLD = 85;   // Порог срабатывания
 const int MIN_DETECTION_TIME = 118*3; // Минимум бит (примерно 0.5 сек), чтобы считать это движением, а не шумом
 
 // Гистерезис

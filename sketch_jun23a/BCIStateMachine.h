@@ -21,7 +21,7 @@ struct PatternTemplate {
     bool isActive;
     
     PatternTemplate(const char* n) 
-        : name(n), currentScore(0), maxScore(0), isActive(false), exampleCount(0) {}
+        : name(n), currentScore(0), maxScore(100), isActive(false), exampleCount(0) {}
         
     // Метод добавления нового примера с пересчетом среднего
     void addExample(const std::vector<bool>& example) {
@@ -34,7 +34,7 @@ struct PatternTemplate {
                 centroid[i] = (float)example[i];
             }
             exampleCount = 1;
-            maxScore = (float)example.size(); // Длина паттерна
+            //maxScore = (float)example.size(); // Длина паттерна
             return;
         }
 

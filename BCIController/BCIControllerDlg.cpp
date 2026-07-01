@@ -145,7 +145,7 @@ void CBCIControllerDlg::ParseIncomingData(const CStringA& line)
 {
     if (line.Find("PATTERN:") == 0) 
     {
-        int firstColon = line.Find(':', 8);
+        int firstColon = line.Find(':', 0);
         int secondColon = line.Find(':', firstColon + 1);
 
         if (firstColon != -1 && secondColon != -1) {
@@ -160,8 +160,8 @@ void CBCIControllerDlg::ParseIncomingData(const CStringA& line)
             m_staticScore.SetWindowText(scoreText);
             m_progressScore.SetPos(score);
 
-            if (score > 80) {
-                Beep(1000, 50);
+            if (score > 99) {
+                Beep(118, 1);
             }
         }
     }
@@ -171,6 +171,7 @@ void CBCIControllerDlg::ParseIncomingData(const CStringA& line)
     else {
         AddLogEntry(CString(CA2W(line)));
     }
+    UpdateData(0);
 }
 
 void CBCIControllerDlg::OnTimer(UINT_PTR nIDEvent)

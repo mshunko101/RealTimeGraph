@@ -8,6 +8,8 @@ BCIStateMachine::BCIStateMachine() {
     currentBestScore = 0;
     bestPatternName[0] = '\0';
     addDefaultPatterns();
+    pinMode(LED_BUILTIN, OUTPUT);
+    digitalWrite(LED_BUILTIN, LOW);    // Выключаем
 }
 
 bool BCIStateMachine::convertToBit(int16_t value) {
@@ -38,6 +40,7 @@ void BCIStateMachine::feedSensorData(int16_t rawValue) {
         recordCount++;
         if (recordCount >= MAX_RECORD_LENGTH) {
             saveCurrentRecording();
+
         }
     }
 
@@ -92,7 +95,7 @@ void BCIStateMachine::checkBitPatterns() {
         if (pat.maxScore > 0 && pat.currentScore > pat.maxScore) pat.currentScore = pat.maxScore;
 
         bool justTriggered = (pat.maxScore > 0 && 
-                               pat.currentScore >= pat.maxScore * 0.9f) && !pat.isActive;
+                               pat.currentScore >= pat.maxScore ) && !pat.isActive;
         
         if (justTriggered) {
             Serial.print(F("PATTERN DETECTED: "));
@@ -100,10 +103,7 @@ void BCIStateMachine::checkBitPatterns() {
             pat.isActive = true;
         }
 
-        if (pat.maxScore > 0 && pat.currentScore < pat.maxScore * 0.3f) {
-            pat.isActive = false;
-        }
-        
+
         int currentPercent = 0;
         if (pat.maxScore > 0) {
             currentPercent = (int)(pat.currentScore / pat.maxScore * 100.0f);
@@ -113,6 +113,11 @@ void BCIStateMachine::checkBitPatterns() {
             currentBestScore = currentPercent;
             strncpy(bestPatternName, pat.name, sizeof(bestPatternName) - 1);
         }
+
+        if (pat.maxScore > 0 && pat.currentScore < pat.maxScore * 0.3f) {
+            pat.isActive = false;
+        }
+        
     }
 }
 
@@ -125,6 +130,7 @@ void BCIStateMachine::saveCurrentRecording() {
             templates[targetTemplateIndex].addExample(tempRecordingBuffer);
             Serial.print(F("Example averaged into template: "));
             Serial.println(templates[targetTemplateIndex].name);
+        digitalWrite(LED_BUILTIN, LOW);    // Выключаем
         }
         targetTemplateIndex = -1;
     } else {
@@ -138,6 +144,7 @@ void BCIStateMachine::saveCurrentRecording() {
         
         Serial.print(F("New Template Created (Averaged): "));
         Serial.println(name);
+        digitalWrite(LED_BUILTIN, LOW);    // Выключаем
     }
 
     tempRecordingBuffer.clear();
@@ -159,6 +166,7 @@ void BCIStateMachine::setTargetTemplate(int index) {
 void BCIStateMachine::processCommand(int cmd) {
     switch (cmd) {
         case CMD_RECORD:
+            digitalWrite(LED_BUILTIN, HIGH);   // Включаем (все каналы)
             isRecordingNewTemplate = !isRecordingNewTemplate;
             tempRecordingBuffer.clear();
             recordCount = 0;

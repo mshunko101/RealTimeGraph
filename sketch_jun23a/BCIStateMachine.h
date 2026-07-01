@@ -6,7 +6,7 @@
 const int WINDOW_SIZE = 118;      // Полное окно анализа (1 сек)
 const int CHUNK_SIZE = 5;         // Группа по 5 бит
 const int MAX_TEMPLATES = 5;      
-const int SCORE_THRESHOLD = 85;   // Порог срабатывания
+const int SCORE_THRESHOLD = 80;   // Порог срабатывания
 const int MIN_DETECTION_TIME = 118*3; // Минимум бит (примерно 0.5 сек), чтобы считать это движением, а не шумом
 
 // Гистерезис
@@ -196,7 +196,7 @@ private:
             // Ограничиваем проверку полным окном, чтобы не лезть в старую историю
             if (availableBits > WINDOW_SIZE) availableBits = WINDOW_SIZE;
 
-            int score = templates[i].getProgressiveScore(bitHistory, availableBits);
+            int score = templates[i].getProgressiveScore(bitHistory, WINDOW_SIZE);
 
             // Отладочный вывод: показывает, как растет уверенность
             // Раскомментируй, если хочешь видеть каждый шаг (может засорить порт)
@@ -222,11 +222,10 @@ private:
             for(int i=0; i<MAX_TEMPLATES; ++i) {
                  if(templates[i].isSet) {
                      // Быстрый пересчет для вывода
-                     int s = templates[i].getProgressiveScore(bitHistory, bitHistory.size());
-                     Serial.print(templates[i].name); Serial.print(":"); Serial.print(s); Serial.print(" ");
+                     int s = templates[i].getProgressiveScore(bitHistory, WINDOW_SIZE);
+                     Serial.print(templates[i].name); Serial.print(":"); Serial.print(s); Serial.println(" ");
                  }
             }
-            Serial.println("");
         }
 
         // ЛОГИКА СРАБАТЫВАНИЯ
